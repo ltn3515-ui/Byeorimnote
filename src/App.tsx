@@ -271,7 +271,8 @@ export default function App(){
       <defs><marker id={'arrow-'+item.id} markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill={item.color}/></marker></defs>
       <line x1={item.x1} y1={item.y1} x2={item.x2} y2={item.y2} stroke={item.color} strokeWidth="3" markerEnd={'url(#arrow-'+item.id+')'}/>
     </g>
-    if(item.type==='text')return <text key={item.id} className={selectedStyle} {...common} x={item.x} y={item.y} fill={item.color} fontSize={item.size} fontWeight="700">{item.text}</text>\n    return null
+    if(item.type==='text')return <text key={item.id} className={selectedStyle} {...common} x={item.x} y={item.y} fill={item.color} fontSize={item.size} fontWeight="700">{item.text}</text>
+    return null
   }
 
   const tools:{id:Tool;icon:string;label:string}[]=[
