@@ -83,7 +83,7 @@ export default function App(){
       id:uid(),type:'stroke',points:[p],
       color:tool==='eraser'?'#ffffff':color,
       width:tool==='eraser'?28:isHigh?18:width,
-      opacity:isHigh?.32:1,
+      opacity:isHigh ? .32 : 1,
       tool:tool as 'pen'|'highlighter'|'eraser'
     }
     setDraft(stroke);drawingRef.current=true
