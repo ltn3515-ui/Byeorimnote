@@ -12,6 +12,8 @@ type InstallPromptEvent=Event&{prompt:()=>Promise<void>;userChoice:Promise<{outc
 type PanState={x:number;y:number;zoom:number}
 type DragState={kind:'pan';sx:number;sy:number;px:number;py:number}|null
 type PinchState={distance:number;zoom:number;cx:number;cy:number;px:number;py:number}|null
+type PwaCheck = { label:string; ok:boolean; detail:string }
+type PwaReport = { checks:PwaCheck[]; installable:boolean; installed:boolean; browser:string; recommendation:string }
 
 export default function App(){
   const [project,setProject]=useState<Project>(()=>{
@@ -28,6 +30,8 @@ export default function App(){
   const [draft,setDraft]=useState<StrokeItem|null>(null)
   const [savedAt,setSavedAt]=useState(Date.now())
   const [installPrompt,setInstallPrompt]=useState<InstallPromptEvent|null>(null)
+  const [showPwa,setShowPwa]=useState(false)
+  const [pwaReport,setPwaReport]=useState<PwaReport|null>(null)
   const [rightOpen,setRightOpen]=useState(true)
   const [showHelp,setShowHelp]=useState(false)
   const [toast,setToast]=useState('')
@@ -54,9 +58,67 @@ export default function App(){
 
   useEffect(()=>{
     const handler=(e:Event)=>{e.preventDefault();setInstallPrompt(e as InstallPromptEvent)}
+    const installed=()=>{setInstallPrompt(null);setToast('벼림노트 설치가 완료됐어요')}
     window.addEventListener('beforeinstallprompt',handler)
-    return()=>window.removeEventListener('beforeinstallprompt',handler)
+    window.addEventListener('appinstalled',installed)
+    return()=>{
+      window.removeEventListener('beforeinstallprompt',handler)
+      window.removeEventListener('appinstalled',installed)
+    }
   },[])
+
+  const runPwaDiagnostics=async()=>{
+    const checks:PwaCheck[]=[]
+    const secure=window.isSecureContext||location.hostname==='localhost'
+    checks.push({label:'HTTPS / 보안 컨텍스트',ok:secure,detail:secure?'정상':'HTTPS 주소로 접속해야 PWA 설치가 가능합니다.'})
+
+    let manifestOk=false
+    try{
+      const res=await fetch('/manifest.webmanifest',{cache:'no-store'})
+      const data=await res.json()
+      manifestOk=res.ok&&Boolean(data?.name)&&Boolean(data?.start_url)&&Array.isArray(data?.icons)&&data.icons.length>0
+      checks.push({label:'Web App Manifest',ok:manifestOk,detail:manifestOk?'정상 · '+data.short_name:'manifest 파일 또는 필수 항목을 확인해야 합니다.'})
+    }catch{
+      checks.push({label:'Web App Manifest',ok:false,detail:'manifest.webmanifest를 불러오지 못했습니다.'})
+    }
+
+    const swSupported='serviceWorker' in navigator
+    checks.push({label:'Service Worker 지원',ok:swSupported,detail:swSupported?'브라우저 지원':'이 브라우저는 Service Worker를 지원하지 않습니다.'})
+
+    let swReady=false
+    if(swSupported){
+      try{
+        const reg=await navigator.serviceWorker.getRegistration('/')
+        if(reg){
+          await navigator.serviceWorker.ready
+          swReady=true
+        }
+      }catch{}
+    }
+    checks.push({label:'Service Worker 등록',ok:swReady,detail:swReady?'정상 등록됨':'등록되지 않았습니다. 새로고침 후 다시 진단해 보세요.'})
+
+    const standalone=window.matchMedia('(display-mode: standalone)').matches||(navigator as Navigator & {standalone?:boolean}).standalone===true
+    checks.push({label:'현재 설치 상태',ok:standalone,detail:standalone?'설치된 PWA로 실행 중':'브라우저에서 실행 중'})
+
+    const ua=navigator.userAgent
+    const browser=/SamsungBrowser/i.test(ua)?'Samsung Internet':/Edg/i.test(ua)?'Microsoft Edge':/Chrome/i.test(ua)?'Chrome':/Firefox/i.test(ua)?'Firefox':'기타 브라우저'
+    const installable=Boolean(installPrompt)
+    checks.push({label:'브라우저 설치 이벤트',ok:installable||standalone,detail:standalone?'이미 설치됨':installable?'설치 프롬프트 사용 가능':'beforeinstallprompt 이벤트가 아직 제공되지 않았습니다.'})
+
+    let recommendation='PWA 설치 조건이 정상입니다. 앱 설치 버튼을 눌러 설치하세요.'
+    if(standalone)recommendation='현재 벼림노트는 이미 설치된 앱 모드로 실행 중입니다.'
+    else if(!secure)recommendation='HTTPS Vercel 주소로 접속한 뒤 다시 진단하세요.'
+    else if(!manifestOk)recommendation='Manifest 로딩 문제를 해결해야 합니다.'
+    else if(!swReady)recommendation='페이지를 새로고침한 뒤 Service Worker 등록 상태를 다시 확인하세요.'
+    else if(!installable)recommendation=browser==='Samsung Internet'
+      ?'Samsung Internet 메뉴에서 “현재 페이지 추가 → 홈 화면” 또는 “앱 설치”를 확인하세요.'
+      :browser==='Chrome'
+        ?'Chrome 우측 상단 메뉴에서 “앱 설치” 또는 “홈 화면에 추가”를 확인하세요. 메뉴에도 없다면 사이트 데이터를 삭제 후 다시 접속하세요.'
+        :'브라우저 메뉴에서 “앱 설치/홈 화면에 추가”를 확인하거나 Chrome으로 다시 시도하세요.'
+
+    setPwaReport({checks,installable,installed:standalone,browser,recommendation})
+    setShowPwa(true)
+  }
 
   const notify=(msg:string)=>{setToast(msg);window.setTimeout(()=>setToast(''),1500)}
   const updatePage=(newItems:BoardItem[],record=true)=>{
@@ -289,6 +351,7 @@ export default function App(){
       <div className="topActions">
         <span className="saveState">● 자동 저장 {new Date(savedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
         <button onClick={install}>앱 설치</button>
+        <button onClick={runPwaDiagnostics}>PWA 진단</button>
         <button onClick={()=>setShowHelp(true)}>?</button>
       </div>
     </header>
@@ -354,6 +417,22 @@ export default function App(){
       </>}
     </aside>
 
+    {showPwa&&<div className="modal" onClick={()=>setShowPwa(false)}><div className="help pwaDiag" onClick={e=>e.stopPropagation()}>
+      <button className="close" onClick={()=>setShowPwa(false)}>×</button>
+      <h2>PWA 설치 진단</h2>
+      <p className="diagBrowser">브라우저: <b>{pwaReport?.browser??'확인 중'}</b></p>
+      <div className="diagList">
+        {pwaReport?.checks.map(check=><div key={check.label} className={'diagRow '+(check.ok?'pass':'fail')}>
+          <span className="diagIcon">{check.ok?'✓':'!'}</span>
+          <div><b>{check.label}</b><small>{check.detail}</small></div>
+        </div>)}
+      </div>
+      <div className="diagRecommendation">
+        <b>다음 조치</b>
+        <p>{pwaReport?.recommendation}</p>
+      </div>
+      {!pwaReport?.installed&&pwaReport?.installable&&<button className="primary" onClick={install}>지금 설치</button>}
+    </div></div>}
     {showHelp&&<div className="modal" onClick={()=>setShowHelp(false)}><div className="help" onClick={e=>e.stopPropagation()}>
       <button className="close" onClick={()=>setShowHelp(false)}>×</button>
       <h2>벼림노트 사용법</h2>
